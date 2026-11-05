@@ -1,0 +1,11 @@
+# Normalise text to LF in the repository; the working copy may be either.
+* text=auto eol=lf
+
+# Scripts that are only run by bash/python are text.
+*.py   text
+*.js   text
+*.html text
+*.css  text
+*.md   text
+*.json text
+*.ps1  text

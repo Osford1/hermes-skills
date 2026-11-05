@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assembly Roadmap</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#ffffff;--ink:#1a1d23;--mut:#6b7280;--acc:#2563eb;--acc-bg:#eff4ff;--warn:#b45309;--warn-bg:#fef3c7;--ok:#16a34a;--line:#e5e7eb;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:16px;max-width:720px;margin:0 auto;line-height:1.55;}
+  header{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:14px;}
+  h1{font-size:1.35rem;line-height:1.25;}
+  .meta{color:var(--mut);font-size:.85rem;margin-top:4px;}
+  .stats{text-align:right;font-size:.9rem;}
+  progress{width:100%;height:10px;border:none;border-radius:99px;overflow:hidden;background:var(--line);}
+  progress::-webkit-progress-bar{background:var(--line);}
+  progress::-webkit-progress-value{background:var(--acc);}
+  .pct{font-weight:600;color:var(--acc);}
+  .btn{background:var(--acc);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.8rem;cursor:pointer;margin-left:8px;}
+  .btn.ghost{background:transparent;color:var(--mut);border:1px solid var(--line);}
+  section.tools{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:16px;}
+  section.tools h2, .extras h2{font-size:.95rem;margin-bottom:6px;}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;}
+  .chip{background:var(--acc-bg);color:var(--acc);border-radius:99px;padding:3px 10px;font-size:.78rem;}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+  .step.done{border-color:var(--ok);}
+  .step-head{display:flex;gap:10px;align-items:flex-start;cursor:pointer;}
+  .step input[type=checkbox]{width:20px;height:20px;accent-color:var(--ok);margin-top:2px;flex:none;cursor:pointer;}
+  .step-title{font-weight:600;}
+  .step-num{color:var(--mut);font-size:.8rem;font-weight:500;}
+  .step.done .step-title{color:var(--mut);text-decoration:line-through;}
+  .detail{margin:8px 0 0 30px;font-size:.9rem;color:var(--ink);}
+  .detail code,.sub code{background:var(--acc-bg);color:var(--acc);border-radius:4px;padding:1px 5px;font-size:.82em;}
+  .warn{background:var(--warn-bg);color:var(--warn);border-left:4px solid var(--warn);border-radius:0 8px 8px 0;padding:8px 12px;margin:10px 0 0 30px;font-size:.85rem;}
+  .sub{margin:8px 0 0 30px;list-style:none;}
+  .sub li{display:flex;gap:8px;align-items:flex-start;font-size:.88rem;margin-bottom:4px;}
+  .sub input{accent-color:var(--acc);margin-top:3px;}
+  .sub label.done{color:var(--mut);text-decoration:line-through;}
+  .sub-detail{color:var(--mut);font-size:.8rem;}
+  .extras{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:16px;}
+  .extras h2{color:var(--acc);}
+  .extras ul{padding-left:20px;font-size:.9rem;}
+  .extras li{margin-bottom:4px;}
+  footer{margin:18px 0 40px;text-align:center;}
+  footer button{font-size:.85rem;}
+  @media print{.btn,footer button{display:none;}body{background:#fff;padding:0;}.step{page-break-inside:avoid;}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="title"></h1>
+    <div class="meta" id="meta"></div>
+  </div>
+  <div class="stats"><span class="pct" id="pct">0%</span><button class="btn ghost" onclick="resetProgress()">Reset</button></div>
+</header>
+<progress id="bar" value="0" max="100"></progress>
+<section class="tools" id="tools"></section>
+<div id="app"></div>
+<div class="extras" id="extras"></div>
+<footer><button class="btn" onclick="window.print()">Print checklist</button></footer>
+<script>
+// ===== FILL THESE IN (per project) =====
+const LOCAL_KEY = 'roadmap-<PROJECT-SLUG>';
+const PROJECT = {
+  title: '<Project name> — Assembly Roadmap',
+  meta: 'Source repo: <URL> · Est. build time: <Xs> · Difficulty: <easy/medium/hard>',
+  tools: ['<screwdriver set>', '<soldering iron>', '<multimeter>', '<zip ties>']
+};
+const STEPS = [
+  {
+    id: 's1', title: '<Step title>',
+    detail: '<What to do. Use <code> for pins/commands.>',
+    warn: '<ONLY for safety/critical notes — empty string to hide>',
+    sub: [
+      { t: '<sub-step 1>', d: '<optional detail>' },
+      { t: '<sub-step 2>', d: '' }
+    ],
+    img: '' // absolute or relative image path; '' to hide
+  },
+  {
+    id: 's2', title: '<Step 2 — flash firmware BEFORE wiring power>',
+    detail: '<…>', warn: '', sub: [], img: ''
+  }
+];
+// Optional ideas for step 8 (customize) — delete EXTRA if none
+const EXTRA = [
+  { title: '<Custom idea>', items: ['<what it needs>', '<how>'] }
+];
+// ===== renderer (no edits needed below) =====
+const LS = (k) => { try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}'); } catch { return {}; } };
+const state = Object.assign({ main: {}, sub: {} }, LS());
+const save = () => localStorage.setItem(LOCAL_KEY, JSON.stringify(state));
+document.getElementById('title').textContent = PROJECT.title;
+document.getElementById('meta').textContent = PROJECT.meta;
+document.getElementById('tools').innerHTML = '<h2>Tools & gear</h2><div class="chips">' +
+  PROJECT.tools.map(t => `<span class="chip">${t}</span>`).join('') + '</div>';
+const app = document.getElementById('app');
+STEPS.forEach((s, i) => {
+  const el = document.createElement('section');
+  el.className = 'step' + (state.main[s.id] ? ' done' : '');
+  const subs = (s.sub || []).map((sub, j) => {
+    const k = s.id + '_' + j; const done = !!state.sub[k];
+    return `<li><input type="checkbox" data-sub="${k}" ${done ? 'checked' : ''}><span><label class="${done ? 'done' : ''}" data-lab="${k}">${sub.t}</label>` +
+      (sub.d ? `<div class="sub-detail">${sub.d}</div>` : '') + '</span></li>';
+  }).join('');
+  el.innerHTML =
+    `<div class="step-head"><input type="checkbox" data-main="${s.id}" ${state.main[s.id] ? 'checked' : ''}>` +
+    `<div><span class="step-num">STEP ${i + 1}</span><div class="step-title">${s.title}</div></div></div>` +
+    (s.detail ? `<div class="detail">${s.detail}</div>` : '') +
+    (s.warn ? `<div class="warn">⚠ ${s.warn}</div>` : '') +
+    (subs ? `<ul class="sub">${subs}</ul>` : '') +
+    (s.img ? `<img src="${s.img}" style="max-width:100%;border-radius:8px;margin:10px 0 0 30px;">` : '');
+  app.appendChild(el);
+  el.querySelector('[data-main]').addEventListener('change', e => {
+    state.main[s.id] = e.target.checked; save(); el.classList.toggle('done', e.target.checked);
+    el.querySelectorAll('.step-title').forEach(t => {}); refresh();
+  });
+  el.querySelectorAll('[data-sub]').forEach(cb => cb.addEventListener('change', e => {
+    state.sub[e.target.dataset.sub] = e.target.checked; save();
+    const lab = el.querySelector(`[data-lab="${e.target.dataset.sub}"]`);
+    lab.classList.toggle('done', e.target.checked); refresh();
+  }));
+});
+if (EXTRA && EXTRA.length) {
+  document.getElementById('extras').innerHTML = '<h2>💡 Customize ideas</h2>' +
+    EXTRA.map(x => `<div><h3 style="font-size:.9rem;margin:8px 0 2px;">${x.title}</h3><ul>${x.items.map(i => `<li>${i}</li>`).join('')}</ul></div>`).join('');
+}
+function refresh() {
+  const total = STEPS.length; let done = 0;
+  STEPS.forEach(s => { if (state.main[s.id]) done++; });
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('bar').value = pct;
+  document.getElementById('pct').textContent = `${done}/${total} · ${pct}%`;
+}
+function resetProgress() {
+  if (!confirm('Reset all checkboxes?')) return;
+  localStorage.removeItem(LOCAL_KEY); location.reload();
+}
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  SVG-first concept widget: figure on the left, readout cards on the right, one contrast toggle.
+  Verify before presenting (browser_exec, file:/// URL):
+    - window.__w exists  (script ran to completion)
+    - svgCounts() has line/text counts > 0
+    - drawnEnd(0) equals project([1,0,0]) within 0.01  -> geometry is right
+    - label strings via text()/textContent, NEVER from a screenshot
+-->
+<style>
+  /* ALIAS the frame's vars; never redeclare them: your <style> is injected AFTER the frame's, so
+     writing --foreground/--card here silently replaces the app's live theme AND defeats the
+     standalone test, which reads --foreground. App var first, fallback inside var(). */
+  :root {
+    --w-fg:     var(--foreground,       #1b1b1f);
+    --w-muted:  var(--muted-foreground, #5c5c68);
+    --w-accent: var(--accent,           #2f6fd0);
+    --w-border: var(--border,           #d6d6dd);
+    --w-card:   var(--card,             #ffffff);
+    /* hues the frame does not supply; JS re-picks them from the FRAME's text luminance, not the OS */
+    --w-x: #a3231d; --w-y: #17692f; --w-z: #1e4b93; --w-hi: #9a6400;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --w-fg: var(--foreground,#e9e9f0); --w-muted: var(--muted-foreground,#a4a4b0);
+            --w-accent: var(--accent,#7ab6ff); --w-border: var(--border,#3a3a45);
+            --w-card: var(--card,#1a1a20);
+            --w-x:#ff8f7e; --w-y:#6ee7a8; --w-z:#8ab4ff; --w-hi:#ffd166; }
+  }
+  body.standalone { background: var(--w-card); color: var(--w-fg); }
+  body.standalone .wrap { padding: 18px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  /* flush-left, fixed width so the frame can measure it; no centering wrapper */
+  .wrap { width: 860px; max-width: 100%; padding: 4px 0 12px; color: var(--w-fg); }
+  h3 { margin: 0 0 4px; font-size: 15px; }
+  .sub { color: var(--w-muted); font-size: 12.5px; margin: 0 0 10px; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .fcol { flex: 0 0 470px; max-width: 100%; }
+  .icol { flex: 1 1 300px; min-width: 270px; }
+  svg { display: block; width: 100%; height: auto; border: 1px solid var(--w-border); border-radius: 8px; }
+  .card { border: 1px solid var(--w-border); border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; }
+  .card h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+             color: var(--w-muted); font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--w-border); border-radius: 8px; overflow: hidden;
+         margin-bottom: 10px; }
+  .seg button { padding: 7px 12px; font-size: 12.5px; background: transparent; color: var(--w-fg);
+                border: 0; border-right: 1px solid var(--w-border); cursor: pointer; }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--w-accent); color: var(--w-card); font-weight: 600; }
+  .ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;
+         font-size: 12.5px; color: var(--w-muted); }
+  select, input[type=range] { background: transparent; color: var(--w-fg); font-size: 12.5px;
+                              border: 1px solid var(--w-border); border-radius: 6px; padding: 3px 5px; }
+  input[type=range] { border: 0; width: 130px; padding: 0; }
+  .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+  .note { font-size: 12px; color: var(--w-muted); line-height: 1.45; margin-top: 6px; }
+  .mk-x{fill:var(--w-x)} .mk-y{fill:var(--w-y)} .mk-z{fill:var(--w-z)} .mk-hi{fill:var(--w-hi)}
+  .ax-x{stroke:var(--w-x)} .ax-y{stroke:var(--w-y)} .ax-z{stroke:var(--w-z)} .ax-hi{stroke:var(--w-hi)}
+  .l-x{fill:var(--w-x)} .l-y{fill:var(--w-y)} .l-z{fill:var(--w-z)} .l-hi{fill:var(--w-hi)}
+</style></head>
+<body><div class="wrap">
+  <h3>Title opens with a capitalised noun phrase</h3>
+  <p class="sub">One line saying what to watch while dragging the control.</p>
+
+  <div class="seg" id="seg">
+    <button data-mode="a" class="on">Reading A</button><button data-mode="b">Reading B</button>
+  </div>
+  <div class="ctl">
+    <span>control</span><input type="range" id="ang" min="0" max="360" step="15" value="90">
+    <span class="mono" id="angv">90&deg;</span>
+  </div>
+
+  <div class="row">
+    <div class="fcol">
+      <svg id="sv" viewBox="0 0 470 330" role="img" aria-label="coordinate frame"></svg>
+      <div class="note">Legend: what each colour and dash style means.</div>
+    </div>
+    <div class="icol">
+      <div class="card"><h4>Readout</h4><div class="mono" id="out"></div></div>
+      <div class="card"><h4>What changed</h4><div class="note" id="why"></div></div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const rootEl = document.documentElement;
+  const lum = hex => {
+    const m = /^#([0-9a-f]{6})$/i.exec((hex||'').trim()); if (!m) return 0;
+    const a = [0,2,4].map(i => parseInt(m[1].substr(i,2),16)/255)
+                     .map(v => v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4));
+    return 0.2126*a[0] + 0.7152*a[1] + 0.0722*a[2];
+  };
+  const framed = getComputedStyle(rootEl).getPropertyValue('--foreground').trim() !== '';
+  document.body.classList.toggle('standalone', !framed);
+  // light app text => dark app theme, so brighten the hues the frame does not supply
+  if (framed && lum(getComputedStyle(rootEl).getPropertyValue('--foreground')) > 0.5) {
+    rootEl.style.setProperty('--w-x','#ff8f7e'); rootEl.style.setProperty('--w-y','#6ee7a8');
+    rootEl.style.setProperty('--w-z','#8ab4ff'); rootEl.style.setProperty('--w-hi','#ffd166');
+  }
+
+  // ---- orthographic camera: azimuth/elevation -> screen px ----
+  const D2R = Math.PI/180, AZ = 38*D2R, EL = 20*D2R, CX = 215, CY = 200, S = 100;
+  const dot   = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const F   = [Math.cos(EL)*Math.cos(AZ), Math.cos(EL)*Math.sin(AZ), Math.sin(EL)];
+  const RGT = [-Math.sin(AZ), Math.cos(AZ), 0];
+  const UP  = cross(F, RGT);
+  const P = v => [CX + S*dot(v,RGT), CY - S*dot(v,UP)];
+  const scale3 = (v,k) => v.map(x => x*k);
+
+  // ---- model: keep every drawn direction here, and read it from the probe hook ----
+  const st = { mode:'a', ang:90 };
+  const AX = { X:[1,0,0], Y:[0,1,0], Z:[0,0,1] };
+  function model(){
+    const t = st.ang*D2R;
+    return { dirs: { X: AX.X, Y: [Math.cos(t), Math.sin(t), 0], Z: AX.Z } };  // REPLACE with the concept
+  }
+
+  function draw(){
+    const m = model();
+    let s = '<defs>' + ['x','y','z','hi'].map(c =>
+      `<marker id="ar-${c}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path class="mk-${c}" d="M0,1 L9,5 L0,9 z"/></marker>`).join('') + '</defs>';
+    const o = P([0,0,0]);
+    for (const k of ['X','Y','Z']){
+      const cl = k.toLowerCase(), p = P(scale3(m.dirs[k], 1)), l = P(scale3(m.dirs[k], 1.16));
+      s += `<line class="ax-${cl}" x1="${o[0]}" y1="${o[1]}" x2="${p[0]}" y2="${p[1]}" stroke-width="1.8" marker-end="url(#ar-${cl})"/>`;
+      s += `<text class="l-${cl}" x="${l[0]}" y="${l[1]+4}" text-anchor="middle">${k}</text>`;
+    }
+    document.getElementById('sv').innerHTML = s;
+    document.getElementById('out').textContent =
+      'dir Y = (' + m.dirs.Y.map(v => v.toFixed(3)).join(', ') + ')';
+    document.getElementById('why').textContent =
+      st.mode === 'a' ? 'Reading A: the axis is carried by the previous step.'
+                      : 'Reading B: the axis never moves.';
+  }
+
+  function sync(){
+    document.getElementById('angv').textContent = st.ang + '\u00b0';
+    document.getElementById('ang').value = st.ang;
+    document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.mode === st.mode));
+    draw();
+  }
+  document.querySelectorAll('#seg button').forEach(b =>
+    b.addEventListener('click', () => { st.mode = b.dataset.mode; sync(); }));
+  document.getElementById('ang').addEventListener('input', e => { st.ang = +e.target.value; sync(); });
+  sync();
+
+  // ---- probe hook: the probe IS your eyes ----
+  window.__w = {
+    state: () => Object.assign({}, st),
+    set:   o => { Object.assign(st, o); sync(); },
+    text:  sel => (document.querySelector(sel) || {}).textContent || '',
+    project:  v => P(v),
+    drawnEnd: i => { const l = document.querySelectorAll('#sv line')[i];
+                     return [+l.getAttribute('x2'), +l.getAttribute('y2')]; },
+    svgCounts: () => { const s = document.getElementById('sv'), c = {};
+                       ['line','text','circle','marker'].forEach(t => c[t] = s.querySelectorAll(t).length);
+                       return c; },
+    theme: () => ({ framed,
+                    fg: getComputedStyle(rootEl).getPropertyValue('--w-fg').trim(),
+                    x:  getComputedStyle(rootEl).getPropertyValue('--w-x').trim() })
+  };
+})();
+</script></body></html>

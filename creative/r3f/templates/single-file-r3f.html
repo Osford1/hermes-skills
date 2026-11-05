@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>single-file R3F scene</title>
+
+<!-- VERIFIED no-build R3F boilerplate. Version pairing: R3F 9 <-> React 19 (R3F 8 <-> React 18).
+     ?external= stops esm.sh bundling its own copy of react/three (silent hook errors otherwise). -->
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.1.0",
+    "react/jsx-runtime": "https://esm.sh/react@19.1.0/jsx-runtime",
+    "react-dom": "https://esm.sh/react-dom@19.1.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.1.0/client",
+    "three": "https://esm.sh/three@0.170.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@9.1.2?external=react,react-dom,three",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@10.0.6?external=react,react-dom,three,@react-three/fiber"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+
+<style>
+  *{ box-sizing:border-box; margin:0; padding:0 }
+  html,body{ height:100%; background:#0b0f14; color:#eef2f7;
+    font:400 14px/1.55 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif }
+  #root{ position:fixed; inset:0 }
+  /* Glass HUD per the glassy-panel-design skill: bloom behind a 36% paper + blur */
+  .bloom{ position:fixed; inset:0; pointer-events:none;
+    background: radial-gradient(50% 40% at 80% 10%, rgba(232,163,61,.13), transparent 70%) }
+  .hud{ position:fixed; top:18px; left:18px; width:280px; padding:16px; border-radius:18px;
+    border:1px solid rgb(255 255 255 / .10); background:rgb(36 42 54 / .36);
+    -webkit-backdrop-filter:blur(24px) saturate(150%); backdrop-filter:blur(24px) saturate(150%);
+    box-shadow: 0 1px 0 rgb(255 255 255/.06) inset, 0 18px 40px -18px rgb(0 0 0/.70) }
+  .hud h1{ font-size:14px; font-weight:600 }
+  .hud .v{ font-family:ui-monospace, Consolas, monospace; font-size:13px; color:#e8a33d }
+  .errbox{ position:fixed; left:18px; bottom:18px; display:none; font:12px ui-monospace, Consolas, monospace;
+    color:#ffb4b4; background:rgba(60,0,0,.45); padding:8px 10px; border-radius:10px }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="bloom"></div>
+<div id="err" class="errbox"></div>
+<script>
+  // Surface errors instead of failing silently — R3F failures are easy to misread as "blank scene".
+  const el = document.getElementById('err')
+  const show = (k, v) => { el.style.display = 'block'; el.textContent = k + ': ' + v }
+  window.addEventListener('error', e => show('ERROR', (e.message || e.error) + ' @' + (e.filename || '') + ':' + (e.lineno || '')))
+  window.addEventListener('unhandledrejection', e => show('REJECTED', String((e.reason && (e.reason.stack || e.reason.message)) || e.reason)))
+</script>
+
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useRef, useEffect } from 'react'
+import { createRoot } from 'react-dom/client'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { OrbitControls, ContactShadows } from '@react-three/drei'
+
+/* Animated values live in a mutable object, never React state (no setState at 60 Hz). */
+const P = { spin: 0.6 }
+
+function Spinner ({ hud }) {
+  const ref = useRef()
+  const t = useRef(0)
+  useFrame((_, dt) => {
+    dt = Math.min(dt, 0.05)                 // clamp after a tab stall
+    t.current += dt
+    if (ref.current) { ref.current.rotation.y += dt * P.spin; ref.current.rotation.x = dt * 0 }
+    hud(t.current)
+  })
+  return (
+    <mesh ref={ref} position={[0, 0.6, 0]} castShadow>
+      <boxGeometry args={[0.8, 0.8, 0.8]} />
+      {/* metalness > 0.3 with NO environment map renders black + blown out */}
+      <meshStandardMaterial color="#dbe3ee" metalness={0.22} roughness={0.5} />
+    </mesh>
+  )
+}
+
+function Scene ({ hud, onReady }) {
+  const gl = useThree(s => s.gl)
+  const scene = useThree(s => s.scene)
+  const camera = useThree(s => s.camera)
+  useEffect(() => {
+    onReady(gl)
+    /* Deterministic offline paint: headless --virtual-time-budget starves both
+       ResizeObserver (canvas stuck at 300x150) and rAF (nothing drawn). */
+    const paint = () => {
+      const el = gl.domElement, p = el.parentElement
+      const w = Math.max(p.clientWidth, window.innerWidth || 800)
+      const h = Math.max(p.clientHeight, window.innerHeight || 600)
+      el.style.width = '100%'; el.style.height = '100%'; el.style.display = 'block'
+      if (el.width !== w * gl.getPixelRatio() || el.height !== h * gl.getPixelRatio()) {
+        gl.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix()
+      }
+      gl.render(scene, camera)
+      window.__framesDrawn = (window.__framesDrawn || 0) + 1
+    }
+    window.__paint = paint
+    const timers = [0, 150, 700, 1600].map(ms => setTimeout(paint, ms))
+    return () => timers.forEach(clearTimeout)
+  }, [gl, scene, camera, onReady])
+  return (
+    <>
+      <color attach="background" args={['#0b0f14']} />
+      <hemisphereLight args={['#cfe0ff', '#0b0f14', 0.7]} />
+      <ambientLight intensity={0.32} />
+      <directionalLight position={[3.4, 5.2, 2.6]} intensity={2.1} castShadow
+        shadow-mapSize={[1024, 1024]} />
+      <gridHelper args={[8, 32, '#2b3648', '#1b2431']} position-y={0.001} />
+      <mesh rotation-x={-Math.PI / 2} receiveShadow>
+        <planeGeometry args={[8, 8]} />
+        <meshStandardMaterial color="#1c2634" metalness={0.05} roughness={0.9} />
+      </mesh>
+      <Spinner hud={hud} />
+      <ContactShadows position={[0, 0.008, 0]} opacity={0.9} scale={5} blur={1.9} far={3} />
+      <OrbitControls enableDamping target={[0, 0.4, 0]} maxPolarAngle={Math.PI * 0.49} />
+    </>
+  )
+}
+
+/* One imperative HUD writer called from the frame loop — no state, no re-render. */
+const api = { hud: () => {}, savePNG: null }
+function App () {
+  const readout = useRef()
+  useEffect(() => { api.hud = t => { if (readout.current) readout.current.textContent = t.toFixed(2) + ' s' } }, [])
+  const onReady = React.useCallback(gl => {
+    api.savePNG = () => {                        // needs preserveDrawingBuffer: true
+      const a = document.createElement('a')
+      a.href = gl.domElement.toDataURL('image/png'); a.download = 'frame.png'; a.click()
+    }
+    window.__ready = true
+  }, [])
+  return (
+    <>
+      <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, preserveDrawingBuffer: true }}
+        camera={{ position: [2.9, 2.4, 2.5], fov: 38 }}>
+        <Scene hud={t => api.hud(t)} onReady={onReady} />
+      </Canvas>
+      <div className="hud">
+        <h1>single-file R3F</h1>
+        <p>t = <span className="v" ref={readout}>—</span></p>
+        <button onClick={() => api.savePNG && api.savePNG()}>save png</button>
+      </div>
+    </>
+  )
+}
+createRoot(document.getElementById('root')).render(<App />)
+</script>
+</body>
+</html>
